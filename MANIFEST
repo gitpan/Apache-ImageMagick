@@ -1,0 +1,6 @@
+MANIFEST
+Makefile.PL
+ImageMagick.pm
+README
+Changes
+mod_aimproxy.c

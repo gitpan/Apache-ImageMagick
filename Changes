@@ -1,0 +1,13 @@
+
+2.0b3 13. Aug 2001 
+
+ - Added mod_aimproxy
+ 
+2.0b2 12. Aug 2001 
+
+ - Added AIMParameter directive
+ - Added -new argument to create images from the scratch
+
+2.0b1 8. Aug 2001 
+
+ - Inital version
