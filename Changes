@@ -1,4 +1,9 @@
 
+2.0b4 14. Sept 2001
+
+ - fixed a bug in Makefile.PL which caused make to complain about
+   ImageMagick.o, which doesn't exist. Reported by Robert.
+
 2.0b3 13. Aug 2001 
 
  - Added mod_aimproxy

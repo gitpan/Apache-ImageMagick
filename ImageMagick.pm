@@ -11,7 +11,7 @@
 ##  WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF 
 ##  MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 ##
-##  $Id: ImageMagick.pm,v 1.8 2001/08/13 06:59:07 richter Exp $
+##  $Id: ImageMagick.pm,v 1.9 2001/09/14 05:41:13 richter Exp $
 ##
 ##--------------------------------------------------------------------------
 
@@ -30,7 +30,7 @@ use DirHandle ();
 use Digest::MD5 ;
 use Text::ParseWords ;
 
-$VERSION = '2.0b3' ;
+$VERSION = '2.0b4' ;
 
 $packnum = 1 ;
 $debug = 0 ;

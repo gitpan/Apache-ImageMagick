@@ -10,7 +10,7 @@
 ##  WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF 
 ##  MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 ##
-##  $Id: Makefile.PL,v 1.1.1.1 2001/08/01 12:41:45 richter Exp $
+##  $Id: Makefile.PL,v 1.2 2001/09/14 05:41:13 richter Exp $
 ##
 ##   Building Makefile for Apache::ImageMagick
 ##
@@ -24,4 +24,5 @@ WriteMakefile
     (
     'NAME'	=> 'Apache::ImageMagick',
     'VERSION_FROM' => 'ImageMagick.pm', # finds $VERSION
+    'C' => [],
     );
