@@ -1,7 +1,7 @@
 
 ##--------------------------------------------------------------------------
 ##
-##  Copyright (c) 2001 Gerald Richter / ecos gmbh www.ecos.de
+##  Copyright (c) 2002 Gerald Richter / ecos gmbh www.ecos.de
 ##  parts (c) Lincoln Stein & Doug MacEachern
 ##
 ##  You may distribute under the terms of either the GNU General Public 
@@ -11,7 +11,7 @@
 ##  WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF 
 ##  MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 ##
-##  $Id: ImageMagick.pm,v 1.10 2001/11/27 11:45:01 richter Exp $
+##  $Id: ImageMagick.pm,v 1.13 2002/09/20 08:07:51 richter Exp $
 ##
 ##--------------------------------------------------------------------------
 
@@ -22,26 +22,44 @@ package Apache::ImageMagick ;
 use strict;
 use vars qw{$VERSION %scriptmtime %scriptsub $packnum $debug} ;
 
-use Apache::Constants qw(:common);
 use Image::Magick ();
-use Apache::File ();
 use File::Basename qw(fileparse);
 use DirHandle ();
 use Digest::MD5 ;
 use Text::ParseWords ;
 
-$VERSION = '2.0b5' ;
+$VERSION = '2.0b7' ;
+
+# define constants here instead of use Apache::Constants qw(:common);to remove dependency
+use constant OK => 0 ;
+use constant NOT_FOUND => 404 ;
+use constant SERVER_ERROR => 500 ;
+use constant DECLINED => -1 ;
 
 $packnum = 1 ;
 $debug = 0 ;
 
+
 my %LegalArguments = map { $_ => 1 } 
-qw (antialias adjoin background bordercolor box colormap colorspace
-    colors compress density dispose delay dither
-    display fill font format geometry gravity iterations interlace
-    loop magick mattecolor monochrome page pointsize
-    preview_type quality rotate scale scene skewX skewY subimage subrange
-    size stroke stroke_width tile text texture translate treedepth undercolor x y);
+qw (antialias adjoin authenticate
+    background blue-primary bordercolor 
+    cache-threshold colormap colorspace compression
+    debug delay density depth dispose dither display
+    endian
+    filename file fill font fuzz 
+    gravity green-primary
+    index iterations interlace
+    loop 
+    magick mattecolor matte monochrome
+    page pen pixel pointsize preview
+    quality 
+    red_primary render 
+    sampling-factor scene subimage subrange server size stroke
+    tile texture type 
+    unit
+    verbose
+    white-primary
+    );
 
 my %LegalFilters = map { $_ => 1 } 
 qw(Annotate AddNoise Blur Border Charcoal Chop
@@ -67,7 +85,7 @@ background
 blue-primary
 bordercolor
 cache-threshold
-colormap[i]
+colormap
 colorspace
 compression
 delay
@@ -80,7 +98,7 @@ filename
 font
 fuzz
 green-primary
-index[x,
+index
 interlace
 iterations
 loop
@@ -89,7 +107,7 @@ matte
 mattecolor
 monochrome
 page
-pixel[x,
+pixel
 pointsize
 preview
 quality
@@ -147,7 +165,7 @@ sub find_image
     for my $entry ($dh->read) 
         {
   	my $candidate = fileparse($entry, '\.\w+');
-  	if ($base eq $candidate) 
+  	if ($base eq $candidate || $base eq $entry) 
             {
   	    # determine whether this is an image file
 	    $source = join '', $directory, $entry;
@@ -183,7 +201,7 @@ sub execute_script
         my $content ;
         {
         local $/ = undef ;
-        open FH, $script or do { $r -> log_error ("Cannot open script $script ($!)") ; return undef ; } ;
+        open FH, $script or do { $r -> log_error ("Apache::ImageMagick: Cannot open script $script ($!)") ; return undef ; } ;
         $content = <FH> ;
         close FH ;
         }
@@ -195,7 +213,7 @@ sub execute_script
         $sub = eval $code ;
         if ($@) 
             {
-            $r -> log_error ($@) ; 
+            $r -> log_error ("Apache::ImageMagick: $@") ; 
             return undef ;
             }
          
@@ -211,12 +229,12 @@ sub execute_script
     my $rc = eval { &{$$sub}($r, $image, $filter, $args) ; } ;
     if ($@) 
         {
-        $r -> log_error ($@) ; 
+        $r -> log_error ("Apache::ImageMagick: $@") ; 
         return undef ;
         }
     if (!$rc) 
         {
-        $r -> log_error ("Script $script doesn't returned true") ; 
+        $r -> log_error ("Apache::ImageMagick: Script $script doesn't returned true") ; 
         return undef ;
         }
     return $rc ;
@@ -233,13 +251,14 @@ sub execute_script
 sub handler 
     {
     my $r = shift;
-    
+    my $useiofile = shift  ;    
+
     my $args = $r -> args ;
     my $path_info = $r -> path_info ;
 
     # If the file exists and there are no transformation arguments
     # just decline the transaction.  It will be handled as usual.
-    return OK unless $args || $path_info || !-r $r->finfo;
+    return OK if ((!$args && !$path_info) || -d $r -> finfo) ;
 
     # calculate name of cache file
     my $file = $r->filename;
@@ -250,8 +269,10 @@ sub handler
     my $cachefn = "$md5.$ext" ;
     my $cachedir  = $r -> dir_config ("AIMCacheDir") || '.' ;
     my $cachepath = "$cachedir/$cachefn" ;
+    my $checkmtime = $r -> dir_config ("AIMCheckMTime") || 0 ;
+    $checkmtime = 0 if (lc($checkmtime) eq 'off') ;
     
-    if (-r $cachepath)
+    if (!$checkmtime && -r $cachepath)
         { # let apache do the rest if image already exists
         $r -> filename ($cachepath) ;
         $r -> path_info ('') ;
@@ -266,10 +287,26 @@ sub handler
     my $scriptext   = $r -> dir_config ("AIMScriptExt") || 'pl' ;
     my $cache       = $r -> dir_config ("AIMCache") || 1 ;
     my $param       = $r -> dir_config ("AIMParameter")  ;
+    my $disablesearch = $r -> dir_config ("AIMDisableSearch") || 0 ;
     $debug       = $r -> dir_config ("AIMDebug") || 0 ;
     $cache = 0 if (lc($cache) eq 'off') ;
     $debug = 0 if (lc($debug) eq 'off') ;
+    $disablesearch = 0 if (lc($disablesearch) eq 'off') ;
 
+
+    if ($debug)
+        {
+        $r -> log_error ("Apache::ImageMagick: AIMCacheDir      = $cachedir") ;
+        $r -> log_error ("Apache::ImageMagick: AIMSourceDir     = $srcdir") ;
+        $r -> log_error ("Apache::ImageMagick: AIMStripPrefix   = $stripprefix") ;
+        $r -> log_error ("Apache::ImageMagick: AIMScriptDir     = $scriptdir") ;
+        $r -> log_error ("Apache::ImageMagick: AIMScriptDefault = $scriptdef") ;
+        $r -> log_error ("Apache::ImageMagick: AIMScriptExt     = $scriptext") ;
+        $r -> log_error ("Apache::ImageMagick: AIMCache         = $cache") ;
+        $r -> log_error ("Apache::ImageMagick: AIMParameter     = $param")  ;
+        $r -> log_error ("Apache::ImageMagick: AIMCheckMTime    = $checkmtime") ;
+        $r -> log_error ("Apache::ImageMagick: AIMDisableSearch = $disablesearch") ;
+        }
 
     my $script ;
     my $basefile ;
@@ -285,7 +322,39 @@ sub handler
         {
         $basefile = $base . $extension ;
         }
+
     $file = "$srcdir/$basefile" if ($srcdir) ;
+
+    # Conversion arguments are kept in the query string, and the
+    # image filter operations are kept in the path info
+    my (%arguments) = $r->args;
+    my @filters     = split '/', $r->path_info ;
+
+    if (-r $file || $arguments{-new}) 
+        { # file exists or new, so it becomes the source
+  	$source = $file;
+        } 
+    elsif (!$disablesearch)
+        {              # file doesn't exist, so we search for it
+  	return DECLINED unless -r $directory;
+  	$source = find_image($r, $directory, $base);
+        }
+    
+    unless ($source) 
+        {
+  	$r->log_error("Apache::ImageMagick: Couldn't find a replacement for $file");
+  	return NOT_FOUND;
+        }
+
+    if ($checkmtime && -M $file > -M $cachepath && -r _)
+        { # let apache do the rest if image already exists and is not new then cache
+        $r -> filename ($cachepath) ;
+        $r -> path_info ('') ;
+        $r -> log_error ("Apache::ImageMagick: Use cached image") if ($debug) ;
+        return OK ;
+        }
+
+
     if ($scriptdir) 
         {
         if ($scriptdir eq '.')
@@ -298,27 +367,7 @@ sub handler
             }
         }
     
-    # Conversion arguments are kept in the query string, and the
-    # image filter operations are kept in the path info
-    my (%arguments) = $r->args;
-    my @filters     = split '/', $r->path_info ;
 
-
-    if (-r $file || $arguments{-new}) 
-        { # file exists or new, so it becomes the source
-  	$source = $file;
-        } 
-    else 
-        {              # file doesn't exist, so we search for it
-  	return DECLINED unless -r $directory;
-  	$source = find_image($r, $directory, $base);
-        }
-    
-    unless ($source) 
-        {
-  	$r->log_error("Couldn't find a replacement for $file");
-  	return NOT_FOUND;
-        }
     
     $r -> log_error ("Apache::ImageMagick: Source: $source  Script: $script  Cachefile: $cachepath") if ($debug) ;
 
@@ -382,8 +431,7 @@ sub handler
         
         if ($debug) 
             {
-            my @args = %args ;
-            $r -> log_error ("Apache::ImageMagick: Filter $filter (@args)") ;
+            $r -> log_error ("Apache::ImageMagick: Filter $filter (", join (',', map { "$_=>$args{$_}" } keys %args), ")") ;
             }
         my $ferr = $q->$filter(%args);
         if ($ferr)
@@ -395,22 +443,42 @@ sub handler
         }
 
     my($tmpnam, $fh) ;
-    if ($cache)
-        { # create and open cachefile
-        $tmpnam = $cachepath ;
-        $fh = Apache::File->new(">$tmpnam");
+    if (!$useiofile)
+        {
+        require Apache::File ;
+        if ($cache)
+            { # create and open cachefile
+            $tmpnam = $cachepath ;
+            $fh = Apache::File->new(">$tmpnam");
+            }
+        else
+            {
+            # Create a temporary file name to use for conversion
+            # The file is automaticly deleted after the request
+            ($tmpnam, $fh) = Apache::File->tmpfile;
+            $tmpnam ||= 'temporary file' if (!$fh) ;
+            }
         }
     else
         {
-        # Create a temporary file name to use for conversion
-        # The file is automaticly deleted after the request
-        ($tmpnam, $fh) = Apache::File->tmpfile;
-        $tmpnam ||= 'temporary file' if (!$fh) ;
+        require IO::File ;
+        if ($cache)
+            { # create and open cachefile
+            $tmpnam = $cachepath ;
+            $fh = IO::File->new(">$tmpnam");
+            }
+        else
+            {
+            # Create a temporary file name to use for conversion
+            # The file is automaticly deleted after the request
+            ($tmpnam, $fh) = IO::File->new_tmpfile;
+            $tmpnam ||= 'temporary file' if (!$fh) ;
+            }
         }
-
+    
     unless ($fh) 
         {
-  	$r->log_error("Couldn't open file $tmpnam for writing ($!)");
+  	$r->log_error("Apache::ImageMagick: Couldn't open file $tmpnam for writing ($!)");
   	return SERVER_ERROR;
         }
 
@@ -421,17 +489,27 @@ sub handler
 	delete $arguments{$_} unless $LegalArguments{$_};
         }
 
+    if ($debug) 
+        {
+        $r -> log_error ("Apache::ImageMagick: Write $tmpnam (", join (',', map { "$_=>$arguments{$_}" } keys %arguments), ")") ;
+        }
+
     # Write out the modified image
+    my $werr ;    
     open(OLDOUT, ">&STDOUT");
     open(STDOUT, ">&=" . fileno($fh));
-    $err ||= $q->Write('filename' => "\U$ext\L:-", %arguments);
+    $werr = $q->Write('filename' => "\U$ext\L:-", %arguments);
+    $err ||= $werr ;    
     close $fh;
     open(STDOUT, ">&OLDOUT");
     if ($err) 
         {
-  	unlink $tmpnam;
-  	$r->log_error("$errfilter $err");
-  	return SERVER_ERROR;
+  	$r->log_error("Apache::ImageMagick: $errfilter $err");
+        if ($err !~ /Warning/) 
+            {
+            unlink $tmpnam;
+            return SERVER_ERROR;
+            }
         }
     $r -> filename ($tmpnam) ;
     $r -> path_info ('') ;
@@ -471,7 +549,7 @@ It is able to convert the source image to any type you request that is supported
 by Image::Magick (e.g. TIFF, PPM, PGM, PPB, GIF, JPEG and more). The requested
 fileformat is determinated by the fileextention of the request and 
 Apache::ImageMagick will search for an image with the same basename and convert it
-automaticly.
+automaticly (unless you set C<AIMDisableSearch>).
 Addtionaly you can specify (multiple) image manipulation filters in the additional path info,
 and format options in the query string. All filters applied in the order they apear in
 the path info. A list of available filters can be found at 
@@ -489,10 +567,10 @@ quality of your jpeg image you can use
 
  http://localhost/images/whatever.jpg?quality=10
  
-A filter ignores all parameters it doesn't knows, so there is no problem if different
-filters requires different parameters. Sometimes two filters have the same parameters. 
-To be able to specify different values you can prefix the parameter name with the
-filter name separated by a colon:
+A filter croaks on parameters it doesn't knows, so there is a problem when you give multiple
+filters different parameters. To distiguish the parameters for different filters or
+to give the same parameter with different values to two filters you can
+prefix the parameter name with the filter name separated by a colon:
 
  http://localhost/images/whatever.gif/Frame/Shade?Frame:color=gold&Shade:color=true
 
@@ -516,7 +594,9 @@ off caching with the C<AIMCache> directive. If a cached image is found
 Apache::ImageMagick does nothing, but let Apache serve it just like a normal image.
 To make cacheing work you normaly have to set the directory where to cache files.
 This is done with the C<AIMCacheDir> directive. Of course the directoy must be
-writeable by your http daemon.
+writeable by your http daemon. If you set addtionaly the C<AIMCheckMTime>
+Apache::ImageMagick always check if the source file is newer then the
+cached file. 
 
 =head2 Using Scripts to process images
 
@@ -694,6 +774,17 @@ then the parameter acts as a default value.
 =item AIMDebug
 
 Turn this on to get some debug info into the httpd error log. Default: off.
+
+=item AIMCheckMTime
+
+When set the modification time of the source image is compared to the time of
+the chached version. If the source is newer the it is recomputed. Default is off.
+
+=item AIMDisableSearch
+
+When set the search for a file with a different format is disabled. Default is
+the automatic search and conversion is on.
+
 
 =back
 

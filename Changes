@@ -1,4 +1,26 @@
 
+2.0b7 28. Sep 2002
+
+ - Updated the list of allowable attribute to write method call, so
+   you don't get and unknow attribute error anymore.
+ - Added AIMCheckMTime which, when set, cause Apache::ImageMagick
+   to compare the modification time of the source and the cached
+   image and recompute the result if the source has changed.
+ - Added AIMDisableSearch to disable auto conversion of image formats
+ - Directory Requests are ignored now, so they can be handled by Apache
+   as usual.
+ - Add example CGI script in scripts/aimcgi.pl
+ - Start with an test suite. You may run it with perl tst/test.pl but
+   it may fail on the test which involves fonts, unless you same the
+   same fonts as on my test machine.
+
+2.0b6 28. Feb 2002
+
+ - ImageMagick warnings are only logged, but image is still returned
+ - Add CGI::ImageMagick which is a fake Apache request and allows
+   to use Apache::ImageMagick as CGI or offline
+ - Fix some copy & paste errors, which causes warnings
+
 2.0b5 27. Nov 2001
 
  - make sure cache files are closed after they have been written.
