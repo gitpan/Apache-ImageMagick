@@ -11,7 +11,7 @@
 ##  WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF 
 ##  MERCHANTIBILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 ##
-##  $Id: ImageMagick.pm,v 1.9 2001/09/14 05:41:13 richter Exp $
+##  $Id: ImageMagick.pm,v 1.10 2001/11/27 11:45:01 richter Exp $
 ##
 ##--------------------------------------------------------------------------
 
@@ -30,7 +30,7 @@ use DirHandle ();
 use Digest::MD5 ;
 use Text::ParseWords ;
 
-$VERSION = '2.0b4' ;
+$VERSION = '2.0b5' ;
 
 $packnum = 1 ;
 $debug = 0 ;
@@ -422,16 +422,17 @@ sub handler
         }
 
     # Write out the modified image
+    open(OLDOUT, ">&STDOUT");
     open(STDOUT, ">&=" . fileno($fh));
     $err ||= $q->Write('filename' => "\U$ext\L:-", %arguments);
+    close $fh;
+    open(STDOUT, ">&OLDOUT");
     if ($err) 
         {
   	unlink $tmpnam;
   	$r->log_error("$errfilter $err");
   	return SERVER_ERROR;
         }
-    close $fh;
-
     $r -> filename ($tmpnam) ;
     $r -> path_info ('') ;
         
